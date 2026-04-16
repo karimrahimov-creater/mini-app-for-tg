@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Task Manager TMA Pro + Sound</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        
+        :root {
+            --bg-gradient: linear-gradient(135deg, #f6f8fb 0%, #e9effd 100%);
+            --card-bg: rgba(255, 255, 255, 0.8);
+            --text-main: #1e293b;
+            --accent: #3b82f6;
+        }
+
+        .dark-theme {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f8fafc;
+            --accent: #60a5fa;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            transition: all 0.3s ease;
+        }
+
+        .glass {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .task-card {
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .task-card:active { transform: scale(0.98); }
+
+        .xp-bar-fill {
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        input, select {
+            background: rgba(0,0,0,0.05) !important;
+            color: inherit !important;
+        }
+        .dark-theme input, .dark-theme select {
+            background: rgba(255,255,255,0.05) !important;
+        }
+
+        /* Переключатель звука */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #3b82f6;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="p-4 pb-32" onclick="initAudio()">
+
+    <!-- Профиль и опыт -->
+    <div class="glass p-5 rounded-[2rem] mb-6 shadow-xl shadow-blue-500/5">
+        <div class="flex items-center gap-4 mb-4">
+            <div class="relative">
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-2xl shadow-lg" id="userAvatar">
+                    👤
+                </div>
+                <div class="absolute -bottom-1 -right-1 bg-yellow-400 text-[10px] font-black px-1.5 py-0.5 rounded-lg border-2 border-white text-slate-900" id="levelBadge">Lvl 1</div>
+            </div>
+            <div class="flex-1">
+                <div class="flex justify-between items-end mb-1">
+                    <h1 class="font-extrabold text-lg" id="userName">Герой</h1>
+                    <span class="text-[10px] font-bold opacity-50 uppercase tracking-widest" id="xpText">0 / 50 XP</span>
+                </div>
+                <div class="h-2.5 w-full bg-slate-200/50 rounded-full overflow-hidden">
+                    <div id="xpBar" class="xp-bar-fill h-full bg-gradient-to-r from-blue-500 to-cyan-400 shadow-[0_0_10px_rgba(59,130,246,0.5)]" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+        <div class="flex justify-around pt-2 border-t border-slate-500/10">
+            <div class="text-center">
+                <div class="text-xs font-bold opacity-50">🔥 Стрик</div>
+                <div class="font-black text-orange-500" id="streakVal">0 дней</div>
+            </div>
+            <div class="text-center">
+                <div class="text-xs font-bold opacity-50">🏆 Задач</div>
+                <div class="font-black text-blue-500" id="doneCount">0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Поиск и тема -->
+    <div class="flex gap-3 mb-6">
+        <div class="relative flex-1">
+            <input id="searchInput" oninput="render()" type="text" placeholder="Поиск приключений..." class="w-full pl-10 pr-4 py-3 rounded-2xl outline-none glass focus:ring-2 focus:ring-blue-500/50">
+            <span class="absolute left-3.5 top-3.5 opacity-30">🔍</span>
+        </div>
+        <button onclick="toggleTheme()" class="glass p-3 rounded-2xl text-xl">
+            <span id="themeIcon">🌗</span>
+        </button>
+    </div>
+
+    <!-- Фильтры категорий -->
+    <div class="flex gap-2 overflow-x-auto pb-4 no-scrollbar mb-2" id="filterContainer"></div>
+
+    <!-- Список задач -->
+    <div id="taskList" class="space-y-3 min-h-[200px]"></div>
+
+    <!-- Пустое состояние -->
+    <div id="emptyState" class="hidden text-center py-16">
+        <div class="text-6xl mb-4 animate-bounce">⚔️</div>
+        <p class="font-bold opacity-40">Нет активных квестов</p>
+    </div>
+
+    <!-- Панель быстрого добавления -->
+    <div class="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white/80 dark:from-slate-900/80 to-transparent backdrop-blur-sm">
+        <div class="glass p-3 rounded-[2.5rem] flex gap-2 items-center shadow-2xl border-t border-white/20">
+            <input id="taskInput" type="text" placeholder="Записать квест..." class="flex-1 bg-transparent border-none outline-none px-4 py-2 font-medium">
+            <select id="taskPriority" class="bg-transparent border-none outline-none text-lg">
+                <option value="1">🟢</option>
+                <option value="2" selected>🟡</option>
+                <option value="3">🔴</option>
+            </select>
+            <button onclick="addTask()" class="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-blue-500/40 hover:scale-105 active:scale-95 transition-all">
+                ＋
+            </button>
+        </div>
+    </div>
+
+    <!-- Настройки модальное окно -->
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
+        <div class="glass rounded-[2.5rem] p-8 w-full max-w-sm">
+            <h2 class="text-2xl font-black mb-6 flex items-center gap-2">⚙️ Настройки <span onclick="toggleSettings()" class="ml-auto opacity-30 cursor-pointer">✕</span></h2>
+            
+            <div class="space-y-6">
+                <!-- Звук -->
+                <div class="flex items-center justify-between">
+                    <span class="font-bold text-sm">Звуковые эффекты</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="soundToggle" onchange="toggleSoundPref()" class="sr-only peer" checked>
+                        <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <!-- Категории -->
+                <div>
+                    <label class="text-[10px] font-black uppercase opacity-40 mb-2 block tracking-widest">Ваши категории</label>
+                    <div class="flex gap-2 mb-3">
+                        <input id="newCatInput" type="text" placeholder="Новая..." class="flex-1 px-4 py-2 rounded-xl outline-none border border-slate-500/10 text-sm">
+                        <button onclick="addCategory()" class="bg-blue-600 text-white px-4 rounded-xl font-bold">＋</button>
+                    </div>
+                    <div id="settingsCatList" class="space-y-2 max-h-40 overflow-y-auto no-scrollbar"></div>
+                </div>
+            </div>
+            
+            <button onclick="toggleSettings()" class="w-full mt-8 py-4 bg-slate-800 text-white rounded-2xl font-black shadow-lg">Готово</button>
+        </div>
+    </div>
+
+    <!-- Кнопка настроек -->
+    <button onclick="toggleSettings()" class="fixed bottom-24 right-4 w-12 h-12 glass rounded-full flex items-center justify-center shadow-lg">
+        ⚙️
+    </button>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.headerColor = '#3b82f6';
+
+        // Состояние
+        let tasks = JSON.parse(localStorage.getItem('tg_tasks_v2')) || [];
+        let categories = JSON.parse(localStorage.getItem('tg_cats_v2')) || ['Работа', 'Личное', 'Дом'];
+        let userStats = JSON.parse(localStorage.getItem('tg_stats')) || { xp: 0, level: 1, streak: 0, lastDate: null };
+        let settings = JSON.parse(localStorage.getItem('tg_settings')) || { sound: true };
+        let currentFilter = 'Все';
+        let theme = localStorage.getItem('tg_theme') || 'auto';
+
+        // Аудио движок (Web Audio API)
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSynthSound(type) {
+            if (!settings.sound || !audioCtx) return;
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            const now = audioCtx.currentTime;
+
+            if (type === 'success') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, now); // D5
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.1); // A5
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            } else if (type === 'levelUp') {
+                const notes = [440, 554.37, 659.25, 880]; // A4, C#5, E5, A5
+                notes.forEach((freq, i) => {
+                    const o = audioCtx.createOscillator();
+                    const g = audioCtx.createGain();
+                    o.connect(g);
+                    g.connect(audioCtx.destination);
+                    o.frequency.value = freq;
+                    g.gain.setValueAtTime(0.1, now + i * 0.1);
+                    g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.3);
+                    o.start(now + i * 0.1);
+                    o.stop(now + i * 0.1 + 0.3);
+                });
+            } else if (type === 'delete') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(220, now);
+                osc.frequency.linearRampToValueAtTime(110, now + 0.1);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'click') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1200, now);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                osc.start(now);
+                osc.stop(now + 0.05);
+            }
+        }
+
+        // Инициализация интерфейса
+        document.getElementById('userName').innerText = tg.initDataUnsafe?.user?.first_name || 'Герой';
+        document.getElementById('soundToggle').checked = settings.sound;
+        applyTheme();
+
+        function save() {
+            localStorage.setItem('tg_tasks_v2', JSON.stringify(tasks));
+            localStorage.setItem('tg_cats_v2', JSON.stringify(categories));
+            localStorage.setItem('tg_stats', JSON.stringify(userStats));
+            localStorage.setItem('tg_settings', JSON.stringify(settings));
+            updateUI();
+            render();
+        }
+
+        function addTask() {
+            const input = document.getElementById('taskInput');
+            if (!input.value.trim()) return;
+
+            tasks.push({
+                id: Date.now(),
+                text: input.value.trim(),
+                category: categories[0] || 'Общее',
+                priority: parseInt(document.getElementById('taskPriority').value),
+                completed: false
+            });
+
+            input.value = '';
+            playSynthSound('click');
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            save();
+        }
+
+        function toggleTask(id) {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+
+            task.completed = !task.completed;
+            
+            if (task.completed) {
+                const xpGain = task.priority * 5;
+                addXP(xpGain);
+                playSynthSound('success');
+                if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+                confetti({
+                    particleCount: 40,
+                    spread: 70,
+                    origin: { y: 0.8 },
+                    colors: ['#3b82f6', '#60a5fa', '#ffffff']
+                });
+            } else {
+                playSynthSound('click');
+            }
+
+            save();
+        }
+
+        function deleteTask(id) {
+            tasks = tasks.filter(t => t.id !== id);
+            playSynthSound('delete');
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('warning');
+            save();
+        }
+
+        function addXP(amount) {
+            userStats.xp += amount;
+            const xpToLevel = userStats.level * 50;
+            
+            if (userStats.xp >= xpToLevel) {
+                userStats.xp -= xpToLevel;
+                userStats.level++;
+                playSynthSound('levelUp');
+                confetti({
+                    particleCount: 150,
+                    spread: 100,
+                    origin: { y: 0.6 }
+                });
+            }
+            checkStreak();
+        }
+
+        function checkStreak() {
+            const now = new Date().toDateString();
+            if (userStats.lastDate !== now) {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                
+                if (userStats.lastDate === yesterday.toDateString()) {
+                    userStats.streak++;
+                } else {
+                    userStats.streak = 1;
+                }
+                userStats.lastDate = now;
+            }
+        }
+
+        function toggleTheme() {
+            if (theme === 'light') theme = 'dark';
+            else if (theme === 'dark') theme = 'light';
+            else theme = 'light';
+            
+            localStorage.setItem('tg_theme', theme);
+            applyTheme();
+        }
+
+        function applyTheme() {
+            const isDark = theme === 'dark' || (theme === 'auto' && tg.colorScheme === 'dark');
+            document.body.classList.toggle('dark-theme', isDark);
+            document.getElementById('themeIcon').innerText = isDark ? '☀️' : '🌙';
+        }
+
+        function toggleSoundPref() {
+            settings.sound = document.getElementById('soundToggle').checked;
+            if (settings.sound) {
+                initAudio();
+                setTimeout(() => playSynthSound('click'), 50);
+            }
+            save();
+        }
+
+        function updateUI() {
+            const xpToLevel = userStats.level * 50;
+            const progress = (userStats.xp / xpToLevel) * 100;
+            
+            document.getElementById('xpBar').style.width = `${progress}%`;
+            document.getElementById('xpText').innerText = `${userStats.xp} / ${xpToLevel} XP`;
+            document.getElementById('levelBadge').innerText = `Lvl ${userStats.level}`;
+            document.getElementById('streakVal').innerText = `${userStats.streak} дней`;
+            document.getElementById('doneCount').innerText = tasks.filter(t => t.completed).length;
+
+            const filters = ['Все', ...categories];
+            document.getElementById('filterContainer').innerHTML = filters.map(f => `
+                <button onclick="setFilter('${f}')" class="whitespace-nowrap px-6 py-2.5 rounded-2xl text-sm font-bold transition-all glass ${currentFilter === f ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40 border-none' : 'opacity-60'}">
+                    ${f}
+                </button>
+            `).join('');
+
+            document.getElementById('settingsCatList').innerHTML = categories.map(c => `
+                <div class="flex items-center justify-between p-3 bg-slate-500/5 rounded-xl border border-slate-500/10">
+                    <span class="font-bold text-sm">${c}</span>
+                    <button onclick="deleteCategory('${c}')" class="text-red-500">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function setFilter(f) {
+            currentFilter = f;
+            playSynthSound('click');
+            updateUI();
+            render();
+        }
+
+        function render() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = tasks.filter(t => 
+                (currentFilter === 'Все' || t.category === currentFilter) &&
+                t.text.toLowerCase().includes(search)
+            );
+
+            const container = document.getElementById('taskList');
+            if (filtered.length === 0) {
+                container.innerHTML = '';
+                document.getElementById('emptyState').classList.remove('hidden');
+            } else {
+                document.getElementById('emptyState').classList.add('hidden');
+                container.innerHTML = filtered.sort((a,b) => b.id - a.id).map(t => {
+                    const prioColor = t.priority === 3 ? 'from-red-500 to-orange-400' : t.priority === 2 ? 'from-yellow-400 to-orange-300' : 'from-green-400 to-emerald-500';
+                    const prioBorder = t.priority === 3 ? 'border-l-red-500' : t.priority === 2 ? 'border-l-yellow-500' : 'border-l-green-500';
+                    return `
+                        <div class="task-card glass p-4 rounded-3xl flex items-center gap-4 relative overflow-hidden border-l-4 ${prioBorder} shadow-sm">
+                            <div onclick="toggleTask(${t.id})" class="w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center cursor-pointer transition-all ${t.completed ? 'bg-green-500 shadow-lg shadow-green-500/30' : 'bg-slate-500/10 border-2 border-slate-500/10'}">
+                                ${t.completed ? '🏆' : ''}
+                            </div>
+                            <div class="flex-1">
+                                <p class="font-bold text-sm ${t.completed ? 'opacity-30 line-through' : ''}">${t.text}</p>
+                                <div class="flex gap-2 items-center mt-1">
+                                    <span class="text-[9px] font-black uppercase tracking-tighter opacity-40">${t.category}</span>
+                                    <div class="w-1.5 h-1.5 rounded-full bg-gradient-to-tr ${prioColor}"></div>
+                                </div>
+                            </div>
+                            <button onclick="deleteTask(${t.id})" class="opacity-10 hover:opacity-100 p-2">✕</button>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        function addCategory() {
+            const input = document.getElementById('newCatInput');
+            if (input.value.trim() && !categories.includes(input.value.trim())) {
+                categories.push(input.value.trim());
+                input.value = '';
+                playSynthSound('click');
+                save();
+            }
+        }
+
+        function deleteCategory(cat) {
+            categories = categories.filter(c => c !== cat);
+            playSynthSound('delete');
+            save();
+        }
+
+        function toggleSettings() {
+            initAudio();
+            document.getElementById('settingsModal').classList.toggle('hidden');
+        }
+
+        // Финальный запуск
+        updateUI();
+        render();
+    </script>
+</body>
+</html>
